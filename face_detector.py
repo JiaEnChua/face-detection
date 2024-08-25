@@ -124,7 +124,7 @@ def replace_green_circle(input_image_path, face_image, face_mask, output_path):
 
     # Save the result
     cv2.imwrite(output_path, img)
-    print(f"Image with replaced face saved to {output_path}")
+    print(f"Image with replaced face saved to {output_path} >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Replace green circle in an image with extracted face")
