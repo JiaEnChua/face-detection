@@ -42,30 +42,34 @@ def detect_and_extract_face(image_path):
     category_mask_array = np.array(category_mask.numpy_view())
 
     # Create a binary mask for hair and face skin
-    height, width = category_mask_array.shape
-    hair_face_mask = np.zeros((height, width), dtype=np.uint8)
+    hair_face_mask = np.zeros(category_mask_array.shape, dtype=np.uint8)
     hair_face_mask[(category_mask_array == 1) | (category_mask_array == 3)] = 255
 
     # Apply the mask to the original image
     head_img = cv2.bitwise_and(img, img, mask=hair_face_mask)
+
+    # Create a transparent background
+    b, g, r = cv2.split(head_img)
+    alpha = hair_face_mask
+    head_img_rgba = cv2.merge((b, g, r, alpha))
 
     # Find the bounding box of the non-zero regions
     non_zero = cv2.findNonZero(hair_face_mask)
     if non_zero is not None:
         x, y, w, h = cv2.boundingRect(non_zero)
         # Crop the image
-        head_img = head_img[y:y+h, x:x+w]
+        head_img_rgba = head_img_rgba[y:y+h, x:x+w]
         hair_face_mask = hair_face_mask[y:y+h, x:x+w]
     else:
         print("No face or hair detected in the image.")
         return None, None
 
-    # Save the extracted head
-    output_path = "output_head.jpg"
-    cv2.imwrite(output_path, head_img)
+    # Save the extracted head with transparent background
+    output_path = "output_head.png"
+    cv2.imwrite(output_path, head_img_rgba)
     print(f"<<<<<<<<<<<Head (hair and face skin) extracted and saved to {output_path}")
 
-    return head_img, hair_face_mask
+    return head_img_rgba, hair_face_mask
 
 def replace_green_circle(input_image_path, face_image, face_mask, output_path):
     # Read the input image
@@ -104,7 +108,6 @@ def replace_green_circle(input_image_path, face_image, face_mask, output_path):
     scale_factor = 1.2  # Increase this value to make the face larger
     new_size = int(diagonal * scale_factor)
     face_resized = cv2.resize(face_image, (new_size, new_size))
-    face_mask_resized = cv2.resize(face_mask, (new_size, new_size))
 
     # Calculate offsets to center the face in the green area
     x_offset = (new_size - w) // 2
@@ -112,14 +115,17 @@ def replace_green_circle(input_image_path, face_image, face_mask, output_path):
 
     # Crop the resized face to fit the green area
     face_cropped = face_resized[y_offset:y_offset+h, x_offset:x_offset+w]
-    face_mask_cropped = face_mask_resized[y_offset:y_offset+h, x_offset:x_offset+w]
 
     # Create a mask for the green area
     green_area_mask = np.zeros(img.shape[:2], dtype=np.uint8)
     cv2.drawContours(green_area_mask, [largest_contour], 0, (255), -1)
 
-    # Apply the green area mask to the face
-    face_masked = cv2.bitwise_and(face_cropped, face_cropped, mask=green_area_mask[y:y+h, x:x+w])
+    # Split the face_cropped into color and alpha channels
+    b, g, r, a = cv2.split(face_cropped)
+    face_rgb = cv2.merge((b, g, r))
+
+    # Apply the alpha channel as a mask
+    face_masked = cv2.bitwise_and(face_rgb, face_rgb, mask=a)
 
     # Place the face inside the green area
     img[y:y+h, x:x+w] = cv2.bitwise_and(img[y:y+h, x:x+w], img[y:y+h, x:x+w], mask=cv2.bitwise_not(green_area_mask[y:y+h, x:x+w]))
