@@ -2,67 +2,70 @@ import cv2
 import numpy as np
 import argparse
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+import os
 
 def detect_and_extract_face(image_path):
-    # Initialize MediaPipe Face Mesh
-    mp_face_mesh = mp.solutions.face_mesh
-    face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, min_detection_confidence=0.5)
-
-    # Read the image
+    # Load the image
     img = cv2.imread(image_path)
     if img is None:
         print(f"Error: Unable to read image at {image_path}")
         return None, None
 
-    # Convert the BGR image to RGB
+    # Convert the image to RGB (MediaPipe uses RGB)
     rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    # Process the image
-    results = face_mesh.process(rgb_image)
+    # Create ImageSegmenterOptions
+    BaseOptions = mp.tasks.BaseOptions
+    ImageSegmenter = mp.tasks.vision.ImageSegmenter
+    ImageSegmenterOptions = mp.tasks.vision.ImageSegmenterOptions
+    VisionRunningMode = mp.tasks.vision.RunningMode
 
-    if not results.multi_face_landmarks:
-        print("No face detected in the image.")
-        return None, None
+    # Update the path to the model file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(current_dir, 'models', 'selfie_multiclass_256x256.tflite')
 
-    # Get the landmarks
-    face_landmarks = results.multi_face_landmarks[0]
+    options = ImageSegmenterOptions(
+        base_options=BaseOptions(model_asset_path=model_path),
+        running_mode=VisionRunningMode.IMAGE,
+        output_category_mask=True)
 
-    # Get the bounding box of the face
-    h, w, _ = img.shape
-    x_min, y_min = w, h
-    x_max, y_max = 0, 0
-    for landmark in face_landmarks.landmark:
-        x, y = int(landmark.x * w), int(landmark.y * h)
-        x_min = min(x_min, x)
-        y_min = min(y_min, y)
-        x_max = max(x_max, x)
-        y_max = max(y_max, y)
+    # Create the segmenter
+    with ImageSegmenter.create_from_options(options) as segmenter:
+        # Perform segmentation
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
+        segmentation_result = segmenter.segment(mp_image)
+        category_mask = segmentation_result.category_mask
 
-    # Expand the bounding box to include hair
-    expansion_factor = 0.3  # Adjust this value to include more or less hair
-    x_min = max(0, int(x_min - (x_max - x_min) * expansion_factor))
-    y_min = max(0, int(y_min - (y_max - y_min) * expansion_factor))
-    x_max = min(w, int(x_max + (x_max - x_min) * expansion_factor))
-    y_max = min(h, int(y_max + (y_max - y_min) * expansion_factor))
+    # Convert the MediaPipe Image to a numpy array
+    category_mask_array = np.array(category_mask.numpy_view())
 
-    # Create a mask using the landmarks
-    mask = np.zeros((h, w), dtype=np.uint8)
-    points = [(int(landmark.x * w), int(landmark.y * h)) for landmark in face_landmarks.landmark]
-    hull = cv2.convexHull(np.array(points))
-    cv2.fillConvexPoly(mask, hull, 255)
-
-    # Expand the mask
-    kernel = np.ones((20, 20), np.uint8)
-    mask = cv2.dilate(mask, kernel, iterations=1)
+    # Create a binary mask for hair and face skin
+    height, width = category_mask_array.shape
+    hair_face_mask = np.zeros((height, width), dtype=np.uint8)
+    hair_face_mask[(category_mask_array == 1) | (category_mask_array == 3)] = 255
 
     # Apply the mask to the original image
-    face_img = cv2.bitwise_and(img, img, mask=mask)
+    head_img = cv2.bitwise_and(img, img, mask=hair_face_mask)
 
-    # Crop the image
-    face_img = face_img[y_min:y_max, x_min:x_max]
-    mask = mask[y_min:y_max, x_min:x_max]
+    # Find the bounding box of the non-zero regions
+    non_zero = cv2.findNonZero(hair_face_mask)
+    if non_zero is not None:
+        x, y, w, h = cv2.boundingRect(non_zero)
+        # Crop the image
+        head_img = head_img[y:y+h, x:x+w]
+        hair_face_mask = hair_face_mask[y:y+h, x:x+w]
+    else:
+        print("No face or hair detected in the image.")
+        return None, None
 
-    return face_img, mask
+    # Save the extracted head
+    output_path = "output_head.jpg"
+    cv2.imwrite(output_path, head_img)
+    print(f"<<<<<<<<<<<Head (hair and face skin) extracted and saved to {output_path}")
+
+    return head_img, hair_face_mask
 
 def replace_green_circle(input_image_path, face_image, face_mask, output_path):
     # Read the input image
@@ -127,16 +130,4 @@ def replace_green_circle(input_image_path, face_image, face_mask, output_path):
     print(f"Image with replaced face saved to {output_path} >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Replace green circle in an image with extracted face")
-    parser.add_argument("face_image", help="Path to the image for face extraction")
-    parser.add_argument("input_image", help="Path to the image with green circle")
-    parser.add_argument("output_image", help="Path to save the final image")
-    args = parser.parse_args()
-
-    # Extract face
-    face_img, face_mask = detect_and_extract_face(args.face_image)
-    if face_img is not None and face_mask is not None:
-        # Replace green circle with face
-        replace_green_circle(args.input_image, face_img, face_mask, args.output_image)
-    else:
-        print("Face extraction failed. Cannot proceed with replacement.")
+    detect_and_extract_face("input_image.jpg")
