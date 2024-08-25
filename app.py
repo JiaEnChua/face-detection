@@ -1,7 +1,7 @@
 from flask import Flask, request, send_file
 from werkzeug.utils import secure_filename
 import os
-from face_detector import detect_and_extract_face, replace_green_circle
+from face_detector import detect_and_extract_face, replace_green_circle, replace_head_no_mask
 import cv2
 import numpy as np
 from flask_cors import CORS
@@ -25,6 +25,7 @@ def face_swap():
 
     face_image = request.files['face_image']
     input_image = request.files['input_image']
+    no_green_mask = request.form.get('noGreenMask', 'false').lower() == 'true'
 
     if face_image.filename == '' or input_image.filename == '':
         return 'No selected file', 400
@@ -42,7 +43,10 @@ def face_swap():
 
         face_img, face_mask = detect_and_extract_face(face_path)
         if face_img is not None and face_mask is not None:
-            replace_green_circle(input_path, face_img, face_mask, output_path)
+            if no_green_mask:
+                replace_head_no_mask(input_path, face_img, face_mask, output_path)
+            else:
+                replace_green_circle(input_path, face_img, face_mask, output_path)
             return send_file(output_path, mimetype='image/jpeg')
         else:
             return 'Face extraction failed', 400
