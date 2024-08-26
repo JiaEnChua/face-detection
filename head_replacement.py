@@ -5,12 +5,12 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-def detect_and_extract_face(image_path):
-    # Load the image
-    img = cv2.imread(image_path)
+def replace_head_no_mask(input_image_path, head_img_rgba, face_mask):
+    # Read the input image
+    img = cv2.imread(input_image_path)
     if img is None:
-        print(f"Error: Unable to read image at {image_path}")
-        return None, None
+        print(f"Error: Unable to read image at {input_image_path}")
+        return
 
     # Convert the image to RGB (MediaPipe uses RGB)
     rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -41,31 +41,27 @@ def detect_and_extract_face(image_path):
     category_mask_array = np.array(category_mask.numpy_view())
 
     # Create a binary mask for hair and face skin
-    hair_face_mask = np.zeros(category_mask_array.shape, dtype=np.uint8)
-    hair_face_mask[(category_mask_array == 1) | (category_mask_array == 3)] = 255
+    head_mask = np.zeros(category_mask_array.shape, dtype=np.uint8)
+    head_mask[(category_mask_array == 1) | (category_mask_array == 3)] = 255
 
-    # Apply the mask to the original image
-    head_img = cv2.bitwise_and(img, img, mask=hair_face_mask)
+    # Find the bounding box of the head
+    non_zero = cv2.findNonZero(head_mask)
+    x, y, w, h = cv2.boundingRect(non_zero)
 
-    # Create a transparent background
-    b, g, r = cv2.split(head_img)
-    alpha = hair_face_mask
-    head_img_rgba = cv2.merge((b, g, r, alpha))
+    # Resize head_img_rgba to fit the detected head area
+    head_resized = cv2.resize(head_img_rgba, (w, h))
 
-    # Find the bounding box of the non-zero regions
-    non_zero = cv2.findNonZero(hair_face_mask)
-    if non_zero is not None:
-        x, y, w, h = cv2.boundingRect(non_zero)
-        # Crop the image
-        head_img_rgba = head_img_rgba[y:y+h, x:x+w]
-        hair_face_mask = hair_face_mask[y:y+h, x:x+w]
-    else:
-        print("No face or hair detected in the image.")
-        return None, None
+    # Split the head_resized into color and alpha channels
+    b, g, r, a = cv2.split(head_resized)
+    head_rgb = cv2.merge((b, g, r))
 
-    # Save the extracted head with transparent background
-    output_path = "output_head.png"
-    return head_img_rgba, hair_face_mask
+    # Create a mask from the alpha channel
+    alpha_mask = a.astype(np.float32) / 255.0
 
-if __name__ == "__main__":
-    detect_and_extract_face("input_image.jpg")
+    # Blend the head image with the original image in the detected head area
+    for c in range(3):  # for each color channel
+        img[y:y+h, x:x+w, c] = img[y:y+h, x:x+w, c] * (1 - alpha_mask) + head_rgb[:, :, c] * alpha_mask
+
+    # Convert the result back to uint8
+    img = img.astype(np.uint8)
+    return img

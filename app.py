@@ -1,9 +1,10 @@
 from flask import Flask, request, send_file
 from werkzeug.utils import secure_filename
 import os
-from face_detector import detect_and_extract_face, replace_green_circle, replace_head_no_mask
 import cv2
-import numpy as np
+from face_detector import detect_and_extract_face
+from green_circle_replacement import replace_green_circle
+from head_replacement import replace_head_no_mask
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -36,7 +37,6 @@ def face_swap():
         
         face_path = os.path.join(app.config['UPLOAD_FOLDER'], face_filename)
         input_path = os.path.join(app.config['UPLOAD_FOLDER'], input_filename)
-        output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'output.jpg')
 
         face_image.save(face_path)
         input_image.save(input_path)
@@ -44,10 +44,14 @@ def face_swap():
         face_img, face_mask = detect_and_extract_face(face_path)
         if face_img is not None and face_mask is not None:
             if no_green_mask:
-                replace_head_no_mask(input_path, face_img, face_mask, output_path)
+                result_img = replace_head_no_mask(input_path, face_img, face_mask)
             else:
-                replace_green_circle(input_path, face_img, face_mask, output_path)
-            return send_file(output_path, mimetype='image/jpeg')
+                result_img = replace_green_circle(input_path, face_img, face_mask)
+            
+            if result_img is not None:
+                return send_file(result_img, mimetype='image/jpeg')
+            else:
+                return 'Face replacement failed', 400
         else:
             return 'Face extraction failed', 400
 
