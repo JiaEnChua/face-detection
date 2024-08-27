@@ -65,11 +65,51 @@ def replace_green_circle(original_img, green_img, head_img_rgba, face_mask):
     head_contours, _ = cv2.findContours(head_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if head_contours:
-        # Find the head contour closest to the green area
-        closest_head = min(head_contours, key=lambda c: 
-            abs(cv2.boundingRect(c)[0] - x) + abs(cv2.boundingRect(c)[1] - y))
-        
+        print('<<<<<< there are', len(head_contours), 'contours >>>>>>')
+
+        # Calculate the center of the green area
+        green_center_x = x + w // 2
+        green_center_y = y + h // 2
+
+        # Get image dimensions
+        img_height, img_width = original_img.shape[:2]
+
+        # Find the head contour with the most overlap with the green area
+        max_overlap = 0
+        closest_head = None
+        face_index = 0
+        for i, contour in enumerate(head_contours):
+            mask = np.zeros(original_img.shape[:2], dtype=np.uint8)
+            cv2.drawContours(mask, [contour], 0, 255, -1)
+            
+            # Ensure we're within image boundaries
+            x1 = max(0, x)
+            y1 = max(0, y)
+            x2 = min(img_width, x + w)
+            y2 = min(img_height, y + h)
+            
+            overlap = cv2.countNonZero(cv2.bitwise_and(mask[y1:y2, x1:x2], green_mask[y1:y2, x1:x2]))
+            
+            if overlap > max_overlap:
+                max_overlap = overlap
+                closest_head = contour
+                face_index = i
+
+            print(f"Contour {i}: Overlap = {overlap}")
+
+        if closest_head is None:
+            print("No suitable head contour found.")
+            return original_img
+        else:
+            print('<<<<<< closest head found >>>>>>', face_index)
+
         fx, fy, fw, fh = cv2.boundingRect(closest_head)
+
+        # Ensure the head bounding rectangle is within image boundaries
+        fx = max(0, fx)
+        fy = max(0, fy)
+        fw = min(fw, img_width - fx)
+        fh = min(fh, img_height - fy)
 
         # Resize head_img_rgba to fit the detected head area
         head_resized = cv2.resize(head_img_rgba, (fw, fh))
@@ -97,8 +137,8 @@ def replace_green_circle(original_img, green_img, head_img_rgba, face_mask):
 
 if __name__ == "__main__":
     face_img, face_mask = detect_and_extract_face('/Users/jiaenchua/Desktop/face-detection/uploads/face_image.jpg')
-    original_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/test2/original_input_image.jpg')
-    green_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/test2/green_enclosed.png')
+    original_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/original_input_image.jpg')
+    green_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/input_image.png')
     
     if original_img is None or green_img is None:
         print("Error: Unable to read one or more input images")
