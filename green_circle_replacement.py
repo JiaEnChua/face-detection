@@ -1,40 +1,50 @@
 import cv2
 import numpy as np
 import mediapipe as mp
-from face_detector import detect_and_extract_face
 import os
 
-def replace_green_circle(original_img, green_img, head_img_rgba, face_mask):
-    # Check if inputs are valid NumPy arrays
-    if not isinstance(original_img, np.ndarray) or not isinstance(green_img, np.ndarray):
-        print("Error: Input images must be NumPy arrays")
-        return None
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
+def find_green_area(green_img, green_color_code):
     # Convert green_img to HSV color space
     hsv = cv2.cvtColor(green_img, cv2.COLOR_BGR2HSV)
 
-    # Define range for green color in HSV
-    lower_green = np.array([40, 40, 40])
-    upper_green = np.array([80, 255, 255])
+    # Convert the hex color code to RGB
+    rgb_color = hex_to_rgb(green_color_code)
+    # Convert RGB to HSV
+    hsv_color = cv2.cvtColor(np.uint8([[rgb_color]]), cv2.COLOR_RGB2HSV)[0][0]
 
-    # Create a mask for green color
-    green_mask = cv2.inRange(hsv, lower_green, upper_green)
+    # Define range for the specified color in HSV
+    lower_color = np.array([max(0, hsv_color[0] - 10), 50, 50])
+    upper_color = np.array([min(179, hsv_color[0] + 10), 255, 255])
 
-    # Find contours in the green mask
-    contours, _ = cv2.findContours(green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Create a mask for the specified color
+    color_mask = cv2.inRange(hsv, lower_color, upper_color)
+
+    # Find contours in the color mask
+    contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
-        print("No green area found in the image.")
-        return green_img
+        print("No area with the specified color found in the image.")
+        return None
 
-    # Find the largest contour (assuming it's the green area)
+    # Find the largest contour (assuming it's the target area)
     largest_contour = max(contours, key=cv2.contourArea)
 
-    # Get the bounding rectangle of the green area
+    # Get the bounding rectangle of the target area
     x, y, w, h = cv2.boundingRect(largest_contour)
 
-    # Use MediaPipe to perform image segmentation on the original image
-    rgb_image = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+    return x, y, w, h
+
+
+def find_head_mask(original_img, x, y, w, h):
+    # Crop the original image to the area of interest
+    roi = original_img[y:y+h, x:x+w]
+    
+    # Use MediaPipe to perform image segmentation on the cropped image
+    rgb_image = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
 
     BaseOptions = mp.tasks.BaseOptions
     ImageSegmenter = mp.tasks.vision.ImageSegmenter
@@ -62,85 +72,95 @@ def replace_green_circle(original_img, green_img, head_img_rgba, face_mask):
     head_mask = cv2.morphologyEx(head_mask, cv2.MORPH_CLOSE, kernel)
     head_mask = cv2.morphologyEx(head_mask, cv2.MORPH_OPEN, kernel)
 
-    head_contours, _ = cv2.findContours(head_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Create a full-size mask with zeros
+    full_mask = np.zeros(original_img.shape[:2], dtype=np.uint8)
+    
+    # Place the head mask in the correct position within the full-size mask
+    full_mask[y:y+h, x:x+w] = head_mask
 
-    if head_contours:
-        print('<<<<<< there are', len(head_contours), 'contours >>>>>>')
+    return full_mask
 
-        # Calculate the center of the green area
-        green_center_x = x + w // 2
-        green_center_y = y + h // 2
+def apply_head_to_image(original_img, head_img_rgba, face_mask, x, y, w, h):
+    # Resize head_img_rgba to fit the detected head area
+    head_resized = cv2.resize(head_img_rgba, (w, h))
 
-        # Get image dimensions
-        img_height, img_width = original_img.shape[:2]
+    # Split the head_resized into color and alpha channels
+    b, g, r, a = cv2.split(head_resized)
+    head_rgb = cv2.merge((b, g, r))
 
-        # Find the head contour with the most overlap with the green area
-        max_overlap = 0
-        closest_head = None
-        face_index = 0
-        for i, contour in enumerate(head_contours):
-            mask = np.zeros(original_img.shape[:2], dtype=np.uint8)
-            cv2.drawContours(mask, [contour], 0, 255, -1)
-            
-            # Ensure we're within image boundaries
-            x1 = max(0, x)
-            y1 = max(0, y)
-            x2 = min(img_width, x + w)
-            y2 = min(img_height, y + h)
-            
-            overlap = cv2.countNonZero(cv2.bitwise_and(mask[y1:y2, x1:x2], green_mask[y1:y2, x1:x2]))
-            
-            if overlap > max_overlap:
-                max_overlap = overlap
-                closest_head = contour
-                face_index = i
+    # Create a mask from the alpha channel and the face mask
+    alpha_mask = a.astype(np.float32) / 255.0
+    combined_mask = alpha_mask * (face_mask.astype(np.float32) / 255.0)
 
-            print(f"Contour {i}: Overlap = {overlap}")
+    # Blend the head image with the original image
+    for c in range(3):  # for each color channel
+        original_img[y:y+h, x:x+w, c] = (
+            original_img[y:y+h, x:x+w, c] * (1 - combined_mask) + 
+            head_rgb[:, :, c] * combined_mask
+        )
 
-        if closest_head is None:
-            print("No suitable head contour found.")
-            return original_img
-        else:
-            print('<<<<<< closest head found >>>>>>', face_index)
+    return original_img
 
-        fx, fy, fw, fh = cv2.boundingRect(closest_head)
+def replace_green_circle(original_img, green_img, head_img_rgba, face_mask, green_color_code):
+    # Check if inputs are valid NumPy arrays
+    if not isinstance(original_img, np.ndarray) or not isinstance(green_img, np.ndarray):
+        print("Error: Input images must be NumPy arrays")
+        return None
 
-        # Ensure the head bounding rectangle is within image boundaries
-        fx = max(0, fx)
-        fy = max(0, fy)
-        fw = min(fw, img_width - fx)
-        fh = min(fh, img_height - fy)
+    # Step 1: Find the area with the specified color
+    color_area = find_green_area(green_img, green_color_code)
+    if color_area is None:
+        return green_img
 
-        # Resize head_img_rgba to fit the detected head area
-        head_resized = cv2.resize(head_img_rgba, (fw, fh))
+    x, y, w, h = color_area
+    print(f"Color area: x={x}, y={y}, w={w}, h={h}")
 
-        # Split the head_resized into color and alpha channels
-        b, g, r, a = cv2.split(head_resized)
-        head_rgb = cv2.merge((b, g, r))
+    # Step 2: Find the best possible head near the color area
+    head_mask = find_head_mask(original_img, x, y, w, h)
+    
+    # Find contours in the head mask
+    contours, _ = cv2.findContours(head_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        print("No head found in the image.")
+        return original_img
 
-        # Create a mask from the alpha channel
-        alpha_mask = a.astype(np.float32) / 255.0
+    # Find the closest head to the color area
+    closest_head = min(contours, key=lambda c: 
+        abs(cv2.boundingRect(c)[0] - x) + abs(cv2.boundingRect(c)[1] - y))
+    
+    hx, hy, hw, hh = cv2.boundingRect(closest_head)
+    print(f"Closest head: x={hx}, y={hy}, w={hw}, h={hh}")
 
-        # Blend the head image with the original image
-        for c in range(3):  # for each color channel
-            original_img[fy:fy+fh, fx:fx+fw, c] = (
-                original_img[fy:fy+fh, fx:fx+fw, c] * (1 - alpha_mask) + 
-                head_rgb[:, :, c] * alpha_mask
-            )
+    # Calculate the distance between the color area and the closest head
+    distance = ((hx - x)**2 + (hy - y)**2)**0.5
+    print(f"Distance between color area and closest head: {distance:.2f} pixels")
 
-    # Convert the result back to uint8
-    result_img = original_img.astype(np.uint8)
-    print('<<<<<<<< Image saved >>>>>>>>>')
-    cv2.imwrite('./uploads/output.jpg', result_img)
+    # Step 3: Resize face_mask to match the head dimensions
+    face_mask_resized = cv2.resize(face_mask, (hw, hh))
 
-    return result_img
+    # Step 4: Resize head_img_rgba to match the head dimensions
+    head_img_resized = cv2.resize(head_img_rgba, (hw, hh))
+
+    # Step 5: Apply the resized head to the original image
+    result_img = apply_head_to_image(original_img, head_img_resized, face_mask_resized, hx, hy, hw, hh)
+
+    # Optionally, draw rectangles on the result image to visualize the areas
+    cv2.rectangle(result_img, (x, y), (x+w, y+h), (0, 255, 0), 2)  # Color area
+    cv2.rectangle(result_img, (hx, hy), (hx+hw, hy+hh), (0, 0, 255), 2)  # Closest head
+    cv2.imwrite('./uploads/output_temp.png', result_img)
+
+    return result_img.astype(np.uint8)
 
 if __name__ == "__main__":
-    face_img, face_mask = detect_and_extract_face('/Users/jiaenchua/Desktop/face-detection/uploads/face_image.jpg')
+    face_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/face_image.png', cv2.IMREAD_UNCHANGED)
     original_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/original_input_image.jpg')
     green_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/input_image.png')
+    green_color_code = '#00FF00'  # Example color code
     
-    if original_img is None or green_img is None:
+    if original_img is None or green_img is None or face_img is None:
         print("Error: Unable to read one or more input images")
     else:
-        result_img = replace_green_circle(original_img, green_img, face_img, face_mask)
+        result_img = replace_green_circle(original_img, green_img, face_img, face_img, green_color_code)
+        cv2.imwrite('./uploads/output.png', result_img)
+        print("Image processing complete. Output saved as 'output.png'")

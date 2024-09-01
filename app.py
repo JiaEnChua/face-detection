@@ -27,7 +27,7 @@ def face_swap():
     face_image = request.files['face_image']
     input_image = request.files['input_image']
     original_input_image = request.files['original_input_image']
-    no_green_mask = request.form.get('noGreenMask', 'false').lower() == 'true'
+    green_color_code = request.form.get('greenColorCode', '#00FF00')  # Default to pure green if not provided
 
     if face_image.filename == '' or input_image.filename == '' or original_input_image.filename == '':
         return 'No selected file', 400
@@ -50,15 +50,12 @@ def face_swap():
 
         face_img, face_mask = detect_and_extract_face(face_path)
         if face_img is not None and face_mask is not None:
-            if no_green_mask:
-                result_img = replace_head_no_mask(input_path, face_img, face_mask)
-            else:
-                result_img = replace_green_circle(cv2.imread(original_input_path), cv2.imread(input_path), face_img, face_mask)
+            result_img = replace_green_circle(cv2.imread(original_input_path), cv2.imread(input_path), face_img, face_mask, green_color_code)
             
             if result_img is not None:
-                output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'output.jpg')
+                output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'output.png')
                 cv2.imwrite(output_path, result_img)
-                return send_file(output_path, mimetype='image/jpeg')
+                return send_file(output_path, mimetype='image/png')
             else:
                 return 'Face replacement failed', 400
         else:
