@@ -51,7 +51,7 @@ def face_swap():
 
         face_img, face_mask = detect_and_extract_face(face_path)
         if face_img is not None and face_mask is not None:
-            result_img, message = replace_green_circle(original_input_image, input_image, face_img, face_mask, green_color_code)
+            result_img, message = replace_green_circle(original_input_image, input_image, face_img, face_mask, green_color_code, app)
             if message is None:
                 # Convert the result image to bytes
                 _, img_encoded = cv2.imencode('.png', result_img)

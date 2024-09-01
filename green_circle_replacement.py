@@ -7,7 +7,7 @@ def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
-def find_green_area(green_img, green_color_code):
+def find_green_area(green_img, green_color_code, app):
     # Convert green_img to HSV color space
     hsv = cv2.cvtColor(green_img, cv2.COLOR_BGR2HSV)
 
@@ -39,7 +39,7 @@ def find_green_area(green_img, green_color_code):
     return x, y, w, h
 
 
-def find_head_mask(original_img, x, y, w, h):
+def find_head_mask_of_roi(original_img, x, y, w, h):
     # Crop the original image to the area of interest
     roi = original_img[y:y+h, x:x+w]
     
@@ -107,24 +107,22 @@ def apply_head_to_image(original_img, head_img_rgba, head_mask, x, y, w, h):
 
     return original_img
 
-def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, green_color_code):
+def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, green_color_code, app):
     # Check if inputs are valid NumPy arrays
     if not isinstance(original_img, np.ndarray) or not isinstance(green_img, np.ndarray):
         return None, "Error: Input images must be NumPy arrays"
 
     # Step 1: Find the area with the specified color
-    color_area = find_green_area(green_img, green_color_code)
+    color_area = find_green_area(green_img, green_color_code, app)
     if color_area is None:
         return green_img, "No area with the specified color found in the image."
 
     x, y, w, h = color_area
-    print(f"Color area: x={x}, y={y}, w={w}, h={h}")
 
     # Step 2: Find all possible heads in the image
-    head_mask = find_head_mask(original_img, x, y, w, h)
-    
+    head_mask_roi = find_head_mask_of_roi(original_img, x, y, w, h)
     # Find contours in the head mask
-    contours, _ = cv2.findContours(head_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(head_mask_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
         return original_img, "No faces found in the image. Please expand the drawing circle to include a face."
@@ -134,7 +132,6 @@ def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, gree
         abs(cv2.boundingRect(c)[0] - x) + abs(cv2.boundingRect(c)[1] - y))
     
     hx, hy, hw, hh = cv2.boundingRect(closest_head)
-    print(f"Closest head: x={hx}, y={hy}, w={hw}, h={hh}")
 
     # Step 3: Resize head_mask to match the head dimensions
     head_mask_resized = cv2.resize(head_mask, (hw, hh))
@@ -144,7 +141,7 @@ def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, gree
 
     # Step 5: Apply the resized head to the original image
     result_img = apply_head_to_image(original_img, head_img_resized, head_mask_resized, hx, hy, hw, hh)
-    
+
     return result_img.astype(np.uint8), None
 
 if __name__ == "__main__":
