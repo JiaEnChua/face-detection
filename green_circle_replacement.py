@@ -144,6 +144,7 @@ def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, gree
 
     # Step 5: Apply the resized head to the original image
     result_img = apply_head_to_image(original_img, head_img_resized, head_mask_resized, hx, hy, hw, hh)
+    
     return result_img.astype(np.uint8), None
 
 if __name__ == "__main__":
