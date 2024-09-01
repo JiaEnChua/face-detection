@@ -81,49 +81,53 @@ def find_head_mask(original_img, x, y, w, h):
     return full_mask
 
 def apply_head_to_image(original_img, head_img_rgba, head_mask, x, y, w, h):
-    # Resize head_img_rgba to fit the detected head area
-    head_resized = cv2.resize(head_img_rgba, (w, h))
+    # Ensure head_img_rgba and head_mask have the correct dimensions
+    head_img_rgba = cv2.resize(head_img_rgba, (w, h))
+    head_mask = cv2.resize(head_mask, (w, h))
 
-    # Split the head_resized into color and alpha channels
-    b, g, r, a = cv2.split(head_resized)
-    head_rgb = cv2.merge((b, g, r))
+    # Split the head_img_rgba into color and alpha channels
+    if head_img_rgba.shape[2] == 4:
+        b, g, r, a = cv2.split(head_img_rgba)
+        head_rgb = cv2.merge((b, g, r))
+    else:
+        head_rgb = head_img_rgba
+        a = np.ones((h, w), dtype=np.uint8) * 255
 
-    # Create a mask from the alpha channel and the face mask
+    # Create a mask from the alpha channel
     alpha_mask = a.astype(np.float32) / 255.0
-    combined_mask = alpha_mask * (head_mask.astype(np.float32) / 255.0)
 
-    # Blend the head image with the original image
+    # Create a region of interest (ROI) in the original image
+    roi = original_img[y:y+h, x:x+w]
+
+    # Directly overlay the head image onto the ROI using the alpha mask
     for c in range(3):  # for each color channel
-        original_img[y:y+h, x:x+w, c] = (
-            original_img[y:y+h, x:x+w, c] * (1 - combined_mask) + 
-            head_rgb[:, :, c] * combined_mask
-        )
+        roi[:, :, c] = roi[:, :, c] * (1 - alpha_mask) + head_rgb[:, :, c] * alpha_mask
+
+    original_img[y:y+h, x:x+w] = roi
 
     return original_img
 
 def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, green_color_code):
     # Check if inputs are valid NumPy arrays
     if not isinstance(original_img, np.ndarray) or not isinstance(green_img, np.ndarray):
-        print("Error: Input images must be NumPy arrays")
-        return None
+        return None, "Error: Input images must be NumPy arrays"
 
     # Step 1: Find the area with the specified color
     color_area = find_green_area(green_img, green_color_code)
     if color_area is None:
-        return green_img
+        return green_img, "No area with the specified color found in the image."
 
     x, y, w, h = color_area
     print(f"Color area: x={x}, y={y}, w={w}, h={h}")
 
-    # Step 2: Find the best possible head near the color area
+    # Step 2: Find all possible heads in the image
     head_mask = find_head_mask(original_img, x, y, w, h)
     
     # Find contours in the head mask
     contours, _ = cv2.findContours(head_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
-        print("No head found in the image.")
-        return original_img
+        return original_img, "No faces found in the image. Please expand the drawing circle to include a face."
 
     # Find the closest head to the color area
     closest_head = min(contours, key=lambda c: 
@@ -131,10 +135,6 @@ def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, gree
     
     hx, hy, hw, hh = cv2.boundingRect(closest_head)
     print(f"Closest head: x={hx}, y={hy}, w={hw}, h={hh}")
-
-    # Calculate the distance between the color area and the closest head
-    distance = ((hx - x)**2 + (hy - y)**2)**0.5
-    print(f"Distance between color area and closest head: {distance:.2f} pixels")
 
     # Step 3: Resize head_mask to match the head dimensions
     head_mask_resized = cv2.resize(head_mask, (hw, hh))
@@ -144,25 +144,22 @@ def replace_green_circle(original_img, green_img, head_img_rgba, head_mask, gree
 
     # Step 5: Apply the resized head to the original image
     result_img = apply_head_to_image(original_img, head_img_resized, head_mask_resized, hx, hy, hw, hh)
-
-    # Optionally, draw rectangles on the result image to visualize the areas
-    cv2.rectangle(result_img, (x, y), (x+w, y+h), (0, 255, 0), 2)  # Color area
-    cv2.rectangle(result_img, (hx, hy), (hx+hw, hy+hh), (0, 0, 255), 2)  # Closest head
-    cv2.imwrite('./uploads/output_temp.png', result_img)
-
-    return result_img.astype(np.uint8)
+    return result_img.astype(np.uint8), None
 
 if __name__ == "__main__":
     face_path = os.path.join(app.config['UPLOAD_FOLDER'], 'face_image.png')
     head_img_rgba, head_mask = detect_and_extract_face(face_path)
     
-    original_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/original_input_image.jpg')
+    original_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/original_input_image.png')
     green_img = cv2.imread('/Users/jiaenchua/Desktop/face-detection/uploads/input_image.png')
     green_color_code = '#00FF00'  # Example color code
     
     if original_img is None or green_img is None or face_img is None:
         print("Error: Unable to read one or more input images")
     else:
-        result_img = replace_green_circle(original_img, green_img, head_img_rgba, head_mask, green_color_code)
-        cv2.imwrite('./uploads/output.png', result_img)
-        print("Image processing complete. Output saved as 'output.png'")
+        result_img, message = replace_green_circle(original_img, green_img, head_img_rgba, head_mask, green_color_code)
+        if message:
+            print(message)
+        else:
+            cv2.imwrite('./uploads/output.png', result_img)
+            print("Image processing complete. Output saved as 'output.png'")

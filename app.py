@@ -47,17 +47,19 @@ def face_swap():
         face_image.save(face_path)
         input_image.save(input_path)
         original_input_image.save(original_input_path)
-
         face_img, face_mask = detect_and_extract_face(face_path)
         if face_img is not None and face_mask is not None:
-            result_img = replace_green_circle(cv2.imread(original_input_path), cv2.imread(input_path), face_img, face_mask, green_color_code)
-            
-            if result_img is not None:
-                output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'output.png')
-                cv2.imwrite(output_path, result_img)
-                return send_file(output_path, mimetype='image/png')
+            result_img, message = replace_green_circle(cv2.imread(original_input_path), cv2.imread(input_path), face_img, face_mask, green_color_code)
+            if message is None:
+                # Convert the result image to bytes
+                _, img_encoded = cv2.imencode('.png', result_img)
+                img_bytes = img_encoded.tobytes()
+                
+                # Return the image bytes directly
+                return img_bytes, 200, {'Content-Type': 'image/png'}
             else:
-                return 'Face replacement failed', 400
+                print(message)
+                return message, 400
         else:
             return 'Face extraction failed', 400
 
