@@ -33,12 +33,12 @@ def pil_to_cv2(pil_image):
 
 @app.route('/face_swap', methods=['POST'])
 def face_swap():
-    print("Received request>>>>>>>>>")
+    imagePrompt = request.form['imagePrompt']
 
+    print("Received request>>>>>>>>> imagePrompt:", imagePrompt)
     input_image_base64 = request.form['input_image']
     original_input_image_base64 = request.form['original_input_image']
     green_color_code = request.form.get('greenColorCode', '#00FF00')  # Default to pure green if not provided
-    imagePrompt = request.form['imagePrompt']
 
     face_image_pil = generate_face_image_with_prompt(imagePrompt)
     if face_image_pil:
