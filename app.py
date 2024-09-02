@@ -4,10 +4,12 @@ import os
 import cv2
 import numpy as np
 import base64
-from face_detector import detect_and_extract_face
+from detect_and_extract_face import detect_and_extract_face
 from green_circle_replacement import replace_green_circle
-from head_replacement import replace_head_no_mask
+from replace_head_no_mask import replace_head_no_mask
+from generate_face_image_with_prompt import generate_face_image_with_prompt
 from flask_cors import CORS
+from PIL import Image
 
 app = Flask(__name__)
 CORS(app)  # This will enable CORS for all routes
@@ -25,31 +27,33 @@ def base64_to_cv2(base64_string):
     nparr = np.frombuffer(img_data, np.uint8)
     return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+def pil_to_cv2(pil_image):
+    # Convert PIL Image to cv2 image
+    return cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+
 @app.route('/face_swap', methods=['POST'])
 def face_swap():
     print("Received request>>>>>>>>>")
-    if 'face_image' not in request.files or 'input_image' not in request.form or 'original_input_image' not in request.form:
-        return 'Missing required files or data', 400
 
-    face_image = request.files['face_image']
     input_image_base64 = request.form['input_image']
     original_input_image_base64 = request.form['original_input_image']
     green_color_code = request.form.get('greenColorCode', '#00FF00')  # Default to pure green if not provided
+    imagePrompt = request.form['imagePrompt']
 
-    if face_image.filename == '':
-        return 'No selected file for face_image', 400
-
-    if face_image and allowed_file(face_image.filename):
-        face_filename = secure_filename(face_image.filename)
-        face_path = os.path.join(app.config['UPLOAD_FOLDER'], face_filename)
-        face_image.save(face_path)
-
+    face_image_pil = generate_face_image_with_prompt(imagePrompt)
+    if face_image_pil:
+        if isinstance(face_image_pil, str):
+            return face_image_pil, 400  # Return error message if generation failed
+        
+        face_image_cv2 = pil_to_cv2(face_image_pil)
         input_image = base64_to_cv2(input_image_base64)
         original_input_image = base64_to_cv2(original_input_image_base64)
+        
+        # Check input image is valid
         cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], 'input_image.png'), input_image)
         cv2.imwrite(os.path.join(app.config['UPLOAD_FOLDER'], 'original_input_image.png'), original_input_image)
 
-        face_img, face_mask = detect_and_extract_face(face_path)
+        face_img, face_mask = detect_and_extract_face(face_image_cv2)
         if face_img is not None and face_mask is not None:
             result_img, message = replace_green_circle(original_input_image, input_image, face_img, face_mask, green_color_code, app)
             if message is None:

@@ -1,0 +1,11 @@
+/path
+
+/myenv
+
+.DS_Store
+
+__pycache__
+
+uploads
+
+.env

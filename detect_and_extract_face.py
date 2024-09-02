@@ -5,13 +5,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-def detect_and_extract_face(image_path):
-    # Load the image
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"Error: Unable to read image at {image_path}")
-        return None, None
-
+def detect_and_extract_face(img):
     # Convert the image to RGB (MediaPipe uses RGB)
     rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
@@ -67,5 +61,3 @@ def detect_and_extract_face(image_path):
     output_path = "output_head.png"
     return head_img_rgba, hair_face_mask
 
-if __name__ == "__main__":
-    detect_and_extract_face("input_image.jpg")
