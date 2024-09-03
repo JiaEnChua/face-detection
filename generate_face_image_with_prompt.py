@@ -19,6 +19,7 @@ def query(payload, retries=5, delay=2):
     return f"Error: Failed to generate image after {retries} attempts."
 
 def generate_face_image_with_prompt(prompt):
+    prompt = f"A photorealistic portrait of a {prompt}, high quality, sharp focus, detailed facial features, natural lighting"
     payload = {
         "inputs": prompt,
         "parameters": {
